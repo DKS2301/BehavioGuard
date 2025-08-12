@@ -2,40 +2,73 @@ import React, { useMemo, useState } from 'react';
 import { View, Text, TextInput, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { useFraudDetection } from '@/services/fraud/useFraudDetection';
 import { RiskBadge } from '@/components/RiskBadge';
+import { useTransactionStore } from '@/state/useTransactionStore';
+import type { NativeStackScreenProps } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '@/navigation/AppNavigator';
 
-export default function TransferScreen() {
+type Props = NativeStackScreenProps<RootStackParamList, 'MainApp'>;
+
+export default function TransferScreen({ navigation }: Props) {
   const [amount, setAmount] = useState('');
   const [account, setAccount] = useState('');
   const [note, setNote] = useState('');
 
   const parsedAmount = useMemo(() => Number(amount) || 0, [amount]);
-  const {
-    riskScore,
-    riskLabel,
-    isRunning,
-    startMonitoring,
-    stopMonitoring,
-    evaluateTransaction
-  } = useFraudDetection();
+  const fraud = useFraudDetection('user123');
+  const { addTransaction, updateTransaction } = useTransactionStore();
 
   const onSubmit = async () => {
     if (!account || parsedAmount <= 0) {
       Alert.alert('Invalid details', 'Enter valid account and amount');
       return;
     }
-    const allowed = await evaluateTransaction({ amount: parsedAmount, account, note });
-    if (allowed) {
-      Alert.alert('Transfer scheduled', 'Your transfer has been initiated.');
-    } else {
+
+    const tx = {
+      id: `tx_${Date.now()}`,
+      amount: parsedAmount,
+      account,
+      accountName: account,
+      note,
+      type: 'transfer' as const,
+      status: 'pending' as const,
+      timestamp: new Date(),
+      fraudRiskScore: 0,
+      fraudRiskLabel: 'LOW' as const,
+    };
+
+    // Run risk evaluation
+    const res = await fraud.evaluateTransaction(tx);
+
+    // Update transaction with risk results
+    const updated = {
+      ...tx,
+      fraudRiskScore: res.riskScore,
+      fraudRiskLabel: res.riskLabel,
+      status: res.shouldBlock ? 'blocked' : res.requiresAdditionalAuth ? 'pending' : 'completed',
+    } as typeof tx;
+
+    // Register transaction in global store (top)
+    addTransaction(updated);
+
+    if (res.shouldBlock) {
       Alert.alert('Transfer blocked', 'High-risk detected. Please verify identity.');
+      return;
     }
+
+    if (res.requiresAdditionalAuth) {
+      // Navigate to biometric modal for verification
+      navigation.navigate('BiometricAuth', { transactionId: updated.id, amount: updated.amount });
+      return;
+    }
+
+    Alert.alert('Transfer scheduled', 'Your transfer has been initiated.');
   };
 
   return (
     <View style={styles.container}>
       <View style={styles.headerRow}>
         <Text style={styles.title}>New Transfer</Text>
-        <RiskBadge score={riskScore} label={riskLabel} />
+        <RiskBadge score={fraud.riskScore} label={fraud.riskLabel} />
       </View>
 
       <TextInput
@@ -62,8 +95,8 @@ export default function TransferScreen() {
       />
 
       <View style={styles.buttonRow}>
-        <TouchableOpacity style={[styles.button, styles.secondary]} onPress={isRunning ? stopMonitoring : startMonitoring}>
-          <Text style={styles.buttonText}>{isRunning ? 'Stop Monitor' : 'Start Monitor'}</Text>
+        <TouchableOpacity style={[styles.button, styles.secondary]} onPress={fraud.isRunning ? fraud.stopMonitoring : fraud.startMonitoring}>
+          <Text style={styles.buttonText}>{fraud.isRunning ? 'Stop Monitor' : 'Start Monitor'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[styles.button, styles.primary]} onPress={onSubmit}>
           <Text style={[styles.buttonText, { color: '#04121c' }]}>Send</Text>

@@ -5,6 +5,7 @@ import { useFraudDetection } from '@/services/fraud/useFraudDetection';
 import { Transaction, RiskLabel } from '@/types/model';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { MainTabParamList } from '@/navigation/AppNavigator';
+import { useTransactionStore } from '@/state/useTransactionStore';
 
 type Props = NativeStackScreenProps<MainTabParamList, 'Transactions'>;
 
@@ -88,7 +89,12 @@ export default function TransactionsScreen({ navigation }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'transfers' | 'payments'>('all');
   const [selectedRiskFilter, setSelectedRiskFilter] = useState<'all' | RiskLabel>('all');
-  const [transactions, setTransactions] = useState<Transaction[]>(mockTransactions);
+  const { transactions, initializeIfEmpty } = useTransactionStore();
+
+  useEffect(() => {
+    // hydrate store with mocks once
+    initializeIfEmpty(mockTransactions);
+  }, [initializeIfEmpty]);
 
   useEffect(() => {
     // Start fraud detection monitoring
@@ -165,31 +171,19 @@ export default function TransactionsScreen({ navigation }: Props) {
 
   const formatDate = (date: Date): string => {
     const now = new Date();
-    const diffInHours = Math.floor((now.getTime() - date.getTime()) / (1000 * 60 * 60));
-    
-    if (diffInHours < 1) {
-      return 'Just now';
-    } else if (diffInHours < 24) {
-      return `${diffInHours}h ago`;
-    } else if (diffInHours < 168) { // 7 days
-      const days = Math.floor(diffInHours / 24);
-      return `${days}d ago`;
-    } else {
-      return new Intl.DateTimeFormat('en-IN', {
-        month: 'short',
-        day: 'numeric',
-      }).format(date);
-    }
+    const d = new Date(date);
+    const diffInHours = Math.floor((now.getTime() - d.getTime()) / (1000 * 60 * 60));
+    if (diffInHours < 1) return 'Just now';
+    if (diffInHours < 24) return `${diffInHours}h ago`;
+    if (diffInHours < 168) return `${Math.floor(diffInHours / 24)}d ago`;
+    return new Intl.DateTimeFormat('en-IN', { month: 'short', day: 'numeric' }).format(d);
   };
 
   const filteredTransactions = transactions.filter(transaction => {
     const matchesSearch = transaction.accountName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                          transaction.account.toLowerCase().includes(searchQuery.toLowerCase());
-    
     const matchesTypeFilter = selectedFilter === 'all' || transaction.type === selectedFilter;
-    
     const matchesRiskFilter = selectedRiskFilter === 'all' || transaction.fraudRiskLabel === selectedRiskFilter;
-    
     return matchesSearch && matchesTypeFilter && matchesRiskFilter;
   });
 
@@ -209,9 +203,7 @@ export default function TransactionsScreen({ navigation }: Props) {
   };
 
   const handleTransactionPress = (transaction: Transaction) => {
-    // Navigate to transaction details or show fraud analysis
     if (transaction.fraudRiskLabel === 'HIGH') {
-      // Show high-risk transaction warning
       alert(`High-risk transaction detected!\n\nAmount: ${formatCurrency(transaction.amount)}\nRecipient: ${transaction.accountName}\nRisk Score: ${(transaction.fraudRiskScore * 100).toFixed(1)}%\n\nThis transaction has been flagged for review.`);
     }
   };
