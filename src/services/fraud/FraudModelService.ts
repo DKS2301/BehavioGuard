@@ -37,32 +37,16 @@ export class FraudModelService {
   }
 
   static async predict({ scaledFeatures, transactionContext, userProfile }: PredictOptions): Promise<number> {
-    const layersModel = TensorflowService.getLayersModel();
-    const graphModel = TensorflowService.getGraphModel();
+    const model = TensorflowService.getModel();
     if (scaledFeatures.length !== 100) throw new Error('Expected 100 features');
     
     try {
-      if (layersModel) {
-        const expects3D = Array.isArray(layersModel.inputs?.[0]?.shape) && (layersModel.inputs![0].shape!.length === 3);
-        const probability = await tf.tidy(async () => {
-          const inputTensor = expects3D
-            ? tf.tensor3d([scaledFeatures], [1, 1, 100])
-            : tf.tensor2d([scaledFeatures], [1, 100]);
-          const output = layersModel.predict(inputTensor) as tf.Tensor;
-          const data = await output.data();
-          return data[0] as number;
-        });
-        return probability; // 0-1
-      }
-      if (graphModel) {
-        const probability = await tf.tidy(async () => {
-          const inputTensor = tf.tensor2d([scaledFeatures], [1, 100]);
-          const output = await graphModel.executeAsync(inputTensor) as tf.Tensor|tf.Tensor[];
-          const tensor = Array.isArray(output) ? output[0] : output;
-          const data = await tensor.data();
-          return data[0] as number;
-        });
-        return probability;
+      if (model) {
+        const input = tf.tensor2d([scaledFeatures], [1, 100]);
+        const output = model.predict(input) as tf.Tensor;
+        const data = await output.data();
+        tf.dispose([input, output]);
+        return data[0]; // probability 0-1
       }
     } catch (error) {
       console.warn('Model prediction failed, using fallback:', error);
@@ -190,9 +174,8 @@ export class FraudModelService {
     // Calculate confidence based on feature quality and consistency
     const history = this.riskHistory.get(userId) || [];
     const featureQuality = features.filter(f => f !== 0 && !isNaN(f)).length / features.length;
-    const recent = history.slice(-10);
-    const historyStd = (recent as number[]).std();
-    const historyConsistency = history.length > 1 ? 1 - Math.min(1, historyStd) : 0.5;
+    const historyConsistency = history.length > 1 ? 
+      1 - Math.std(history.slice(-10)) : 0.5;
     
     return Math.min(1, (featureQuality + historyConsistency) / 2);
   }

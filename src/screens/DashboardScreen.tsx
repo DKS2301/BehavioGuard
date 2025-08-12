@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFraudDetection } from '@/services/fraud/useFraudDetection';
@@ -73,6 +73,15 @@ export default function DashboardScreen({ navigation }: Props) {
   const fraudDetection = useFraudDetection('user123');
   const { features } = useBehaviorStore();
   const [selectedAccount, setSelectedAccount] = useState<Account>(mockAccounts[0]);
+
+  useEffect(() => {
+    // Start fraud detection monitoring
+    fraudDetection.startMonitoring();
+    
+    return () => {
+      fraudDetection.stopMonitoring();
+    };
+  }, [fraudDetection]);
 
   const getRiskColor = (riskLabel: RiskLabel): string => {
     switch (riskLabel) {

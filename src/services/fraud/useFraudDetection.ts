@@ -4,10 +4,8 @@ import { FraudModelService } from '@/services/fraud/FraudModelService';
 import { useBehaviorStore } from '@/state/useBehaviorStore';
 import { RiskLabel, Transaction, FraudAlert, BehavioralProfile, User } from '@/types/model';
 import { useSensors } from '@/services/sensors/useSensors';
-import { FeatureExtractor } from '@/services/FeatureExtractor';
-import { BehavioralProfileService, UserBaseline } from '@/services/BehavioralProfileService';
 
-export function useFraudDetection(userId?: string, options?: { autoStart?: boolean }) {
+export function useFraudDetection(userId?: string) {
   const [isRunning, setIsRunning] = useState(false);
   const [riskScore, setRiskScore] = useState(0);
   const [riskLabel, setRiskLabel] = useState<RiskLabel>('LOW');
@@ -17,15 +15,11 @@ export function useFraudDetection(userId?: string, options?: { autoStart?: boole
   const [fraudAlerts, setFraudAlerts] = useState<FraudAlert[]>([]);
   const [requiresAdditionalAuth, setRequiresAdditionalAuth] = useState(false);
   const [shouldBlock, setShouldBlock] = useState(false);
-  const [userBaseline, setUserBaseline] = useState<UserBaseline | null>(null);
-  const [adaptiveThresholds, setAdaptiveThresholds] = useState({ low: 0.3, medium: 0.7, high: 0.9 });
   
   const { features, setFeatures } = useBehaviorStore();
   const sensors = useSensors();
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const lastTransactionRef = useRef<Transaction | null>(null);
-  const sensorsRef = useRef(sensors);
-  useEffect(() => { sensorsRef.current = sensors; }, [sensors]);
 
   const thresholds = useMemo(
     () => ({
@@ -40,61 +34,26 @@ export function useFraudDetection(userId?: string, options?: { autoStart?: boole
     FraudModelService.loadScaler().catch(() => {});
   }, []);
 
-  // Load user baseline and adaptive thresholds
-  useEffect(() => {
-    if (userId) {
-      BehavioralProfileService.getUserBaseline(userId).then(setUserBaseline);
-      BehavioralProfileService.getAdaptiveThresholds(userId).then(setAdaptiveThresholds);
-    }
-  }, [userId]);
-
   const startMonitoring = useCallback(() => {
+    if (isRunning) return;
     setIsRunning(true);
-  }, []);
-
-  const stopMonitoring = useCallback(() => {
-    setIsRunning(false);
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-    }
-    sensorsRef.current.stop();
-  }, []);
-
-  useEffect(() => {
-    if (!isRunning) return;
-    sensorsRef.current.start();
+    sensors.start();
+    
     intervalRef.current = setInterval(async () => {
       try {
-        const raw: Record<string, number> = sensorsRef.current.getFeatureSnapshot();
-        const sensorData = sensorsRef.current.getCurrentSensorData();
-        const vectorRaw = FeatureExtractor.extractBehavioralFeatures(raw, sensorData, lastTransactionRef.current || undefined);
+        // Collect behavioral features from sensors
+        const raw: Record<string, number> = sensors.getFeatureSnapshot();
+        
+        // Get current sensor data for context
+        const sensorData = sensors.getCurrentSensorData();
+        
+        // Transform features using scaler
         const scaler = FraudModelService.getScaler();
-        const vector = scaler.transformVector(vectorRaw);
+        const vector = scaler.transform(raw);
         setFeatures(vector);
-
-        // Update user baseline with new behavioral data
-        if (userId) {
-          const updatedBaseline = await BehavioralProfileService.updateUserBaseline(
-            userId,
-            vectorRaw, // Use raw features for baseline learning
-            sensorData,
-            lastTransactionRef.current || undefined
-          );
-          setUserBaseline(updatedBaseline);
-        }
-
-        // Calculate anomaly score based on user's behavioral baseline
-        let anomalyScore = 0;
-        let anomalyFactors: string[] = [];
-        if (userBaseline && userId) {
-          const anomaly = BehavioralProfileService.calculateAnomalyScore(vectorRaw, userBaseline);
-          anomalyScore = anomaly.score;
-          anomalyFactors = anomaly.factors;
-        }
-
-        // Combine AI model prediction with behavioral anomaly
-        const aiRiskAssessment = await FraudModelService.assessTransactionRisk(
+        
+        // Perform real-time risk assessment
+        const riskAssessment = await FraudModelService.assessTransactionRisk(
           vector,
           lastTransactionRef.current || {
             id: 'monitoring',
@@ -109,34 +68,18 @@ export function useFraudDetection(userId?: string, options?: { autoStart?: boole
           },
           userId || 'anonymous'
         );
-
-        // Blend AI score with behavioral anomaly (weighted average)
-        const aiWeight = 0.7; // AI model gets 70% weight
-        const behavioralWeight = 0.3; // Behavioral anomaly gets 30% weight
-        const blendedScore = (aiRiskAssessment.riskScore * aiWeight) + (anomalyScore * behavioralWeight);
         
-        // Use adaptive thresholds for risk labeling
-        const currentThresholds = adaptiveThresholds;
-        let blendedRiskLabel: RiskLabel = 'LOW';
-        if (blendedScore >= currentThresholds.high) {
-          blendedRiskLabel = 'HIGH';
-        } else if (blendedScore >= currentThresholds.medium) {
-          blendedRiskLabel = 'MEDIUM';
-        }
-
-        // Combine risk factors from both sources
-        const combinedFactors = [...aiRiskAssessment.factors, ...anomalyFactors];
+        // Update state with risk assessment
+        setRiskScore(riskAssessment.riskScore);
+        setRiskLabel(riskAssessment.riskLabel);
+        setConfidence(riskAssessment.confidence);
+        setRiskFactors(riskAssessment.factors);
+        setRecommendations(riskAssessment.recommendations);
+        setRequiresAdditionalAuth(riskAssessment.requiresAdditionalAuth);
+        setShouldBlock(riskAssessment.shouldBlock);
         
-        setRiskScore(blendedScore);
-        setRiskLabel(blendedRiskLabel);
-        setConfidence(aiRiskAssessment.confidence);
-        setRiskFactors(combinedFactors);
-        setRecommendations(aiRiskAssessment.recommendations);
-        setRequiresAdditionalAuth(blendedRiskLabel === 'MEDIUM');
-        setShouldBlock(blendedRiskLabel === 'HIGH');
-
         // Create fraud alert if risk is high
-        if (blendedRiskLabel === 'HIGH') {
+        if (riskAssessment.riskLabel === 'HIGH') {
           const alert = await FraudModelService.createFraudAlert(
             userId || 'anonymous',
             lastTransactionRef.current || {
@@ -147,37 +90,28 @@ export function useFraudDetection(userId?: string, options?: { autoStart?: boole
               type: 'transfer',
               status: 'pending',
               timestamp: new Date(),
-              fraudRiskScore: blendedScore,
-              fraudRiskLabel: blendedRiskLabel
+              fraudRiskScore: riskAssessment.riskScore,
+              fraudRiskLabel: riskAssessment.riskLabel
             },
-            {
-              ...aiRiskAssessment,
-              riskScore: blendedScore,
-              riskLabel: blendedRiskLabel,
-              factors: combinedFactors
-            }
+            riskAssessment
           );
           setFraudAlerts(prev => [alert, ...prev]);
         }
+        
       } catch (error) {
         console.warn('Fraud detection monitoring error:', error);
       }
-    }, 1000);
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      sensorsRef.current.stop();
-    };
-  }, [isRunning, setFeatures, userId, userBaseline, adaptiveThresholds]);
+    }, 1000); // Update every second for real-time monitoring
+  }, [isRunning, sensors, setFeatures, userId]);
 
-  // Auto-start/stop tied to userId and option
-  useEffect(() => {
-    const shouldStart = options?.autoStart !== false;
-    if (userId && shouldStart) setIsRunning(true);
-    return () => setIsRunning(false);
-  }, [userId, options?.autoStart]);
+  const stopMonitoring = useCallback(() => {
+    setIsRunning(false);
+    sensors.stop();
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  }, [sensors]);
 
   const evaluateTransaction = useCallback(
     async (transaction: Transaction): Promise<{
@@ -195,88 +129,36 @@ export function useFraudDetection(userId?: string, options?: { autoStart?: boole
       try {
         // Get current behavioral features
         const raw = sensors.getFeatureSnapshot();
-        const sensorData = sensors.getCurrentSensorData();
-        const vectorRaw = FeatureExtractor.extractBehavioralFeatures(raw, sensorData, transaction);
         const scaler = FraudModelService.getScaler();
-        const vector = scaler.transformVector(vectorRaw);
+        const vector = scaler.transform(raw);
         
-        // Update user baseline with transaction context
-        if (userId) {
-          const updatedBaseline = await BehavioralProfileService.updateUserBaseline(
-            userId,
-            vectorRaw,
-            sensorData,
-            transaction
-          );
-          setUserBaseline(updatedBaseline);
-        }
-
-        // Calculate behavioral anomaly
-        let anomalyScore = 0;
-        let anomalyFactors: string[] = [];
-        if (userBaseline && userId) {
-          const anomaly = BehavioralProfileService.calculateAnomalyScore(vectorRaw, userBaseline);
-          anomalyScore = anomaly.score;
-          anomalyFactors = anomaly.factors;
-        }
-
-        // Assess transaction risk with AI model
-        const aiRiskAssessment = await FraudModelService.assessTransactionRisk(
+        // Assess transaction risk
+        const riskAssessment = await FraudModelService.assessTransactionRisk(
           vector,
           transaction,
           userId || 'anonymous'
         );
-
-        // Blend AI and behavioral scores
-        const aiWeight = 0.7;
-        const behavioralWeight = 0.3;
-        const blendedScore = (aiRiskAssessment.riskScore * aiWeight) + (anomalyScore * behavioralWeight);
-        
-        // Use adaptive thresholds
-        const currentThresholds = adaptiveThresholds;
-        let blendedRiskLabel: RiskLabel = 'LOW';
-        if (blendedScore >= currentThresholds.high) {
-          blendedRiskLabel = 'HIGH';
-        } else if (blendedScore >= currentThresholds.medium) {
-          blendedRiskLabel = 'MEDIUM';
-        }
-
-        // Combine factors
-        const combinedFactors = [...aiRiskAssessment.factors, ...anomalyFactors];
         
         // Update state
-        setRiskScore(blendedScore);
-        setRiskLabel(blendedRiskLabel);
-        setConfidence(aiRiskAssessment.confidence);
-        setRiskFactors(combinedFactors);
-        setRecommendations(aiRiskAssessment.recommendations);
-        setRequiresAdditionalAuth(blendedRiskLabel === 'MEDIUM');
-        setShouldBlock(blendedRiskLabel === 'HIGH');
+        setRiskScore(riskAssessment.riskScore);
+        setRiskLabel(riskAssessment.riskLabel);
+        setConfidence(riskAssessment.confidence);
+        setRiskFactors(riskAssessment.factors);
+        setRecommendations(riskAssessment.recommendations);
+        setRequiresAdditionalAuth(riskAssessment.requiresAdditionalAuth);
+        setShouldBlock(riskAssessment.shouldBlock);
         
         // Create fraud alert if needed
-        if (blendedRiskLabel === 'MEDIUM' || blendedRiskLabel === 'HIGH') {
+        if (riskAssessment.riskLabel === 'MEDIUM' || riskAssessment.riskLabel === 'HIGH') {
           const alert = await FraudModelService.createFraudAlert(
             userId || 'anonymous',
             transaction,
-            {
-              ...aiRiskAssessment,
-              riskScore: blendedScore,
-              riskLabel: blendedRiskLabel,
-              factors: combinedFactors
-            }
+            riskAssessment
           );
           setFraudAlerts(prev => [alert, ...prev]);
         }
         
-        return {
-          riskLabel: blendedRiskLabel,
-          riskScore: blendedScore,
-          confidence: aiRiskAssessment.confidence,
-          factors: combinedFactors,
-          recommendations: aiRiskAssessment.recommendations,
-          requiresAdditionalAuth: blendedRiskLabel === 'MEDIUM',
-          shouldBlock: blendedRiskLabel === 'HIGH'
-        };
+        return riskAssessment;
         
       } catch (error) {
         console.error('Transaction risk evaluation failed:', error);
@@ -292,7 +174,7 @@ export function useFraudDetection(userId?: string, options?: { autoStart?: boole
         };
       }
     },
-    [sensors, userId, userBaseline, adaptiveThresholds]
+    [sensors, userId]
   );
 
   const updateBehavioralProfile = useCallback((profile: BehavioralProfile) => {
@@ -327,6 +209,17 @@ export function useFraudDetection(userId?: string, options?: { autoStart?: boole
     );
   }, []);
 
+  // Auto-start monitoring when component mounts
+  useEffect(() => {
+    if (userId) {
+      startMonitoring();
+    }
+    
+    return () => {
+      stopMonitoring();
+    };
+  }, [userId, startMonitoring, stopMonitoring]);
+
   return {
     // State
     isRunning,
@@ -338,8 +231,6 @@ export function useFraudDetection(userId?: string, options?: { autoStart?: boole
     fraudAlerts,
     requiresAdditionalAuth,
     shouldBlock,
-    userBaseline,
-    adaptiveThresholds,
     
     // Actions
     startMonitoring,

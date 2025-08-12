@@ -4,9 +4,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFraudDetection } from '@/services/fraud/useFraudDetection';
 import { useBehaviorStore } from '@/state/useBehaviorStore';
 import { RiskLabel, FraudAlert, BehavioralProfile } from '@/types/model';
-import { BehavioralAdaptationStatus } from '@/components/BehavioralAdaptationStatus';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { MainTabParamList } from '@/navigation/AppNavigator';
+import { BehavioralAdaptationStatus } from '@/components/BehavioralAdaptationStatus';
+import { FraudSimulationPanel } from '@/components/FraudSimulationPanel';
 
 type Props = NativeStackScreenProps<MainTabParamList, 'Security'>;
 
@@ -109,13 +110,6 @@ export default function SecurityDashboardScreen({ navigation }: Props) {
         <Text style={styles.title}>Security Dashboard</Text>
         <Text style={styles.subtitle}>BehaviorGuard AI Protection Status</Text>
       </View>
-
-      {/* Behavioral Adaptation Status */}
-      <BehavioralAdaptationStatus
-        userBaseline={fraudDetection.userBaseline}
-        adaptiveThresholds={fraudDetection.adaptiveThresholds}
-        sampleCount={fraudDetection.userBaseline?.sampleCount || 0}
-      />
 
       {/* Current Security Status */}
       <View style={styles.securityStatus}>
@@ -298,6 +292,9 @@ export default function SecurityDashboardScreen({ navigation }: Props) {
           </View>
         </View>
       </View>
+
+      {/* Fraud Simulation Panel */}
+      <FraudSimulationPanel />
 
       {/* Security Tips */}
       <View style={styles.securityTips}>

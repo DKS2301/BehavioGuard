@@ -254,116 +254,60 @@ export function useSensors() {
     const networkType = 1; // Mock value
     const deviceOrientation = 0; // Mock value
 
-    // Helper functions for statistical calculations
-    const std = (arr: number[]) => {
-      if (arr.length < 2) return 0;
-      const m = mean(arr);
-      return Math.sqrt(arr.reduce((sum, val) => sum + Math.pow(val - m, 2), 0) / (arr.length - 1));
-    };
-    const min = (arr: number[]) => arr.length ? Math.min(...arr) : 0;
-    const max = (arr: number[]) => arr.length ? Math.max(...arr) : 0;
-    const median = (arr: number[]) => {
-      if (arr.length === 0) return 0;
-      const sorted = [...arr].sort((a, b) => a - b);
-      const mid = Math.floor(sorted.length / 2);
-      return sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
-    };
-    const skewness = (arr: number[]) => {
-      if (arr.length < 3) return 0;
-      const m = mean(arr);
-      const s = std(arr);
-      if (s === 0) return 0;
-      return arr.reduce((sum, val) => sum + Math.pow((val - m) / s, 3), 0) / arr.length;
-    };
-    const kurtosis = (arr: number[]) => {
-      if (arr.length < 4) return 0;
-      const m = mean(arr);
-      const s = std(arr);
-      if (s === 0) return 0;
-      return arr.reduce((sum, val) => sum + Math.pow((val - m) / s, 4), 0) / arr.length - 3;
-    };
-    const range = (arr: number[]) => max(arr) - min(arr);
-    const iqr = (arr: number[]) => {
-      if (arr.length < 4) return 0;
-      const sorted = [...arr].sort((a, b) => a - b);
-      const q1 = sorted[Math.floor(sorted.length * 0.25)];
-      const q3 = sorted[Math.floor(sorted.length * 0.75)];
-      return q3 - q1;
-    };
-
-    // Get current time for temporal features
-    const now = new Date();
-
     const snapshot: Record<string, number> = {
-      // MOTION FEATURES (0-29) - Accelerometer (0-14)
+      // Motion features (6)
       accelMeanX: mean(ax), accelMeanY: mean(ay), accelMeanZ: mean(az),
-      accelStdX: std(ax), accelStdY: std(ay), accelStdZ: std(az),
-      accelMaxX: max(ax), accelMaxY: max(ay), accelMaxZ: max(az),
-      accelMinX: min(ax), accelMinY: min(ay), accelMinZ: min(az),
-      accelMedianX: median(ax), accelMedianY: median(ay), accelMedianZ: median(az),
-
-      // MOTION FEATURES (0-29) - Gyroscope (15-29)
       gyroMeanX: mean(gx), gyroMeanY: mean(gy), gyroMeanZ: mean(gz),
-      gyroStdX: std(gx), gyroStdY: std(gy), gyroStdZ: std(gz),
-      gyroMaxX: max(gx), gyroMaxY: max(gy), gyroMaxZ: max(gz),
-      gyroMinX: min(gx), gyroMinY: min(gy), gyroMinZ: min(gz),
-      gyroMedianX: median(gx), gyroMedianY: median(gy), gyroMedianZ: median(gz),
-
-      // TOUCH FEATURES (30-59) - Pressure (30-39)
-      touchPressureMean: mean(touchPressure), touchPressureStd: std(touchPressure),
-      touchPressureMax: max(touchPressure), touchPressureMin: min(touchPressure),
-      touchPressureMedian: median(touchPressure), touchPressureVar: variance(touchPressure),
-      touchPressureSkew: skewness(touchPressure), touchPressureKurt: kurtosis(touchPressure),
-      touchPressureRange: range(touchPressure), touchPressureIQR: iqr(touchPressure),
-
-      // TOUCH FEATURES (30-59) - Duration (40-49)
-      touchDurationMean: mean(touchDuration), touchDurationStd: std(touchDuration),
-      touchDurationMax: max(touchDuration), touchDurationMin: min(touchDuration),
-      touchDurationMedian: median(touchDuration), touchDurationVar: variance(touchDuration),
-      touchDurationSkew: skewness(touchDuration), touchDurationKurt: kurtosis(touchDuration),
-      touchDurationRange: range(touchDuration), touchDurationIQR: iqr(touchDuration),
-
-      // TOUCH FEATURES (30-59) - Area (50-59)
-      touchAreaMean: mean(touchArea), touchAreaStd: std(touchArea),
-      touchAreaMax: max(touchArea), touchAreaMin: min(touchArea),
-      touchAreaMedian: median(touchArea), touchAreaVar: variance(touchArea),
-      touchAreaSkew: skewness(touchArea), touchAreaKurt: kurtosis(touchArea),
-      touchAreaRange: range(touchArea), touchAreaIQR: iqr(touchArea),
-
-      // LOCATION & TIME FEATURES (60-74) - Location (60-69)
-      locationLat: mean(locationLat), locationLng: mean(locationLng),
-      locationAccuracy: currentLocation?.coords.accuracy || 10,
-      locationSpeed: 0, // Would need speed calculation from location history
-      locationAltitude: currentLocation?.coords.altitude || 0,
-      locationDistance: 0, // Would need distance calculation
-      locationBearing: 0, // Would need bearing calculation
-      locationLatVar: variance(locationLat), locationLngVar: variance(locationLng),
-      locationConsistency: location.length > 1 ? 0.8 : 0.5,
-
-      // LOCATION & TIME FEATURES (60-74) - Time (70-74)
-      timeOfDay: now.getHours(), dayOfWeek: now.getDay(),
-      dayOfMonth: now.getDate(), monthOfYear: now.getMonth() + 1,
-      timeSinceLastLogin: 86400000, // Mock: 24 hours ago
-
-      // TRANSACTION FEATURES (75-89) - Historical patterns
-      transactionFrequency: 3, // Mock: 3 transactions per day
-      transactionAmountMean: 5000, transactionAmountStd: 2000,
-      transactionAmountMax: 15000, transactionAmountMin: 100,
-      transactionTimeMean: 14, transactionTimeStd: 4, // 2 PM ± 4 hours
-      transactionDayMean: 3, transactionDayStd: 2, // Wednesday ± 2 days
-      transactionTypeFreq: 0.6, // 60% transfers
-      transactionRiskHistory: 0.15, // Historical average risk
-
-      // DEVICE USAGE FEATURES (90-94)
-      batteryLevel: 0.75, // Mock battery level
-      networkType: 1, // WiFi
-      deviceOrientation: 0, // Portrait
-      deviceBrightness: 0.7, // Mock brightness
-      deviceVolume: 0.6, // Mock volume
-
-      // BEHAVIORAL FEATURES (95-99)
-      loginAttempts: 1, navigationActions: 8,
-      keyboardStrokes: 20, biometricAttempts: 1, biometricFailures: 0,
+      
+      // Motion variance features (6)
+      accelVarX: variance(ax), accelVarY: variance(ay), accelVarZ: variance(az),
+      gyroVarX: variance(gx), gyroVarY: variance(gy), gyroVarZ: variance(gz),
+      
+      // Motion correlation features (3)
+      accelCorrXY: correlation(ax, ay), accelCorrXZ: correlation(ax, az), accelCorrYZ: correlation(ay, az),
+      
+      // Touch features (15)
+      touchPressure: mean(touchPressure), touchDuration: mean(touchDuration), touchArea: mean(touchArea),
+      touchVelocity: mean(touchPressure), touchAcceleration: mean(touchPressure),
+      touchPressureVar: variance(touchPressure), touchDurationVar: variance(touchDuration), touchAreaVar: variance(touchArea),
+      touchVelocityVar: variance(touchPressure), touchAccelerationVar: variance(touchPressure),
+      touchPressureCorr: correlation(touchPressure, touchDuration), touchDurationCorr: correlation(touchDuration, touchArea), touchAreaCorr: correlation(touchArea, touchPressure),
+      touchVelocityCorr: correlation(touchPressure, touchDuration), touchAccelerationCorr: correlation(touchDuration, touchArea),
+      
+      // Timing features (20)
+      timeBetweenTouches: mean(timeBetweenTouches), timeBetweenScreens: 1000,
+      timeInApp: 300000, timeSinceLastLogin: 86400000,
+      timeOfDay: new Date().getHours(), dayOfWeek: new Date().getDay(), dayOfMonth: new Date().getDate(),
+      timeBetweenTransactions: 3600000, timeToCompleteTransaction: 30000,
+      timeToEnterPIN: 5000, timeToNavigate: 2000,
+      timeBetweenPINAttempts: 10000, timeToBiometricAuth: 3000,
+      timeToLoadScreen: 1500, timeToProcessRequest: 2000,
+      timeInBackground: 0, timeToResume: 500,
+      timeToConnect: 1000, timeToAuthenticate: 5000,
+      
+      // Location features (10)
+      locationLat: mean(locationLat), locationLng: mean(locationLng), locationAccuracy: 10,
+      locationSpeed: 0, locationAltitude: 100,
+      locationDistance: 0, locationBearing: 0,
+      locationLatVar: variance(locationLat), locationLngVar: variance(locationLng), locationConsistency: 0.8,
+      
+      // Device features (15)
+      batteryLevel, batteryCharging: 0, batteryHealth: 0.9,
+      networkType, networkStrength: 0.8, networkSpeed: 100,
+      deviceOrientation, deviceBrightness: 0.7, deviceVolume: 0.6,
+      deviceTemperature: 25, deviceMemory: 0.7, deviceStorage: 0.6,
+      deviceUptime: 86400000, deviceLastRestart: 604800000, deviceModel: 1,
+      
+      // Behavioral features (25)
+      screenTouches: touch.length, screenSwipes: 5, screenPinches: 2,
+      keyboardStrokes: 20, navigationActions: 8, transactionCount: 3,
+      loginAttempts: 1, failedLogins: 0, successfulLogins: 1,
+      biometricAttempts: 1, biometricFailures: 0, biometricSuccesses: 1,
+      appLaunches: 5, appCrashes: 0, appUpdates: 1,
+      securityAlerts: 0, fraudAlerts: 0, riskScoreHistory: 0.2,
+      locationChanges: location.length, timeZoneChanges: 0, languageChanges: 0,
+      themeChanges: 0, notificationSettings: 1, privacySettings: 1,
+      securitySettings: 1, appPermissions: 1,
     };
 
     return snapshot;

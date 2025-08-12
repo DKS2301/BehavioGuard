@@ -21,7 +21,7 @@ const { width, height } = Dimensions.get('window');
 
 export default function BiometricAuthModal({ navigation, route }: Props) {
   const { transactionId, amount } = route.params;
-  const fraudDetection = useFraudDetection('user123', { autoStart: false });
+  const fraudDetection = useFraudDetection('user123');
   const [isAuthenticating, setIsAuthenticating] = useState(false);
   const [authSuccess, setAuthSuccess] = useState(false);
   const [authFailed, setAuthFailed] = useState(false);
