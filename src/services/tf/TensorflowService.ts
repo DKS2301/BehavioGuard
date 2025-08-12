@@ -7,7 +7,8 @@ import assetModuleMap from '@/services/tf/assetMap';
 
 export class TensorflowService {
   private static initialized = false;
-  private static model: tf.LayersModel | null = null;
+  private static layersModel: tf.LayersModel | null = null;
+  private static graphModel: tf.GraphModel | null = null;
 
   static async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -25,32 +26,45 @@ export class TensorflowService {
         .filter(Boolean);
       if (modelJsonObject && weightModuleIds.length > 0) {
         const ioHandler = bundleResourceIO(modelJsonObject, weightModuleIds);
-        this.model = await tf.loadLayersModel(ioHandler);
+        // Try LayersModel first
+        try {
+          this.layersModel = await tf.loadLayersModel(ioHandler);
+        } catch (e) {
+          // If it's a GraphModel, load accordingly
+          this.graphModel = await tf.loadGraphModel(ioHandler as any);
+        }
       } else {
         // Fallback: try to load from FileSystem if present
         const modelPath = `${FileSystem.documentDirectory}models/model.json`;
         const info = await FileSystem.getInfoAsync(modelPath);
         if (info.exists) {
-          this.model = await tf.loadLayersModel(modelPath);
+          try {
+            this.layersModel = await tf.loadLayersModel(modelPath);
+          } catch {
+            this.graphModel = await tf.loadGraphModel(modelPath as any);
+          }
         }
       }
     } catch (error) {
-      // eslint-disable-next-line no-console
-      console.warn('bundleResourceIO load failed; falling back or using stub.', error);
+      // Silently continue to FS fallback below
       try {
         const modelPath = `${FileSystem.documentDirectory}models/model.json`;
         const info = await FileSystem.getInfoAsync(modelPath);
         if (info.exists) {
-          this.model = await tf.loadLayersModel(modelPath);
+          try {
+            this.layersModel = await tf.loadLayersModel(modelPath);
+          } catch {
+            this.graphModel = await tf.loadGraphModel(modelPath as any);
+          }
         }
       } catch {}
     }
     this.initialized = true;
   }
 
-  static getModel(): tf.LayersModel | null {
-    return this.model;
-  }
+  static getLayersModel(): tf.LayersModel | null { return this.layersModel; }
+  static getGraphModel(): tf.GraphModel | null { return this.graphModel; }
+  static hasModel(): boolean { return !!(this.layersModel || this.graphModel); }
 }
 
 

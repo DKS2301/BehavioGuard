@@ -278,7 +278,21 @@ export class BehavioralProfileService {
   private static async getAllProfiles(): Promise<Record<string, UserBaseline>> {
     try {
       const data = await AsyncStorage.getItem(this.STORAGE_KEY);
-      return data ? JSON.parse(data) : {};
+      const parsed = data ? JSON.parse(data) : {};
+      // revive Date fields
+      Object.keys(parsed).forEach((uid) => {
+        const p = parsed[uid];
+        if (p) {
+          if (p.lastUpdated) p.lastUpdated = new Date(p.lastUpdated);
+          if (Array.isArray(p.locationPatterns)) {
+            p.locationPatterns = p.locationPatterns.map((lp: any) => ({
+              ...lp,
+              lastSeen: lp.lastSeen ? new Date(lp.lastSeen) : undefined,
+            }));
+          }
+        }
+      });
+      return parsed;
     } catch {
       return {};
     }

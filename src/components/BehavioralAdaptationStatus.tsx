@@ -43,6 +43,11 @@ export function BehavioralAdaptationStatus({ userBaseline, adaptiveThresholds, s
     );
   }
 
+  const lastUpdatedDate = userBaseline.lastUpdated ? new Date(userBaseline.lastUpdated) : null;
+  const lastUpdatedText = lastUpdatedDate && !isNaN(lastUpdatedDate.getTime())
+    ? lastUpdatedDate.toLocaleDateString()
+    : 'N/A';
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -116,7 +121,7 @@ export function BehavioralAdaptationStatus({ userBaseline, adaptiveThresholds, s
       <View style={styles.lastUpdated}>
         <Ionicons name="time" size={14} color="#6b7280" />
         <Text style={styles.lastUpdatedText}>
-          Last updated: {userBaseline.lastUpdated.toLocaleDateString()}
+          Last updated: {lastUpdatedText}
         </Text>
       </View>
     </View>

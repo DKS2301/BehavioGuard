@@ -37,21 +37,32 @@ export class FraudModelService {
   }
 
   static async predict({ scaledFeatures, transactionContext, userProfile }: PredictOptions): Promise<number> {
-    const model = TensorflowService.getModel();
+    const layersModel = TensorflowService.getLayersModel();
+    const graphModel = TensorflowService.getGraphModel();
     if (scaledFeatures.length !== 100) throw new Error('Expected 100 features');
     
     try {
-      if (model) {
-        const expects3D = Array.isArray(model.inputs?.[0]?.shape) && (model.inputs![0].shape!.length === 3);
+      if (layersModel) {
+        const expects3D = Array.isArray(layersModel.inputs?.[0]?.shape) && (layersModel.inputs![0].shape!.length === 3);
         const probability = await tf.tidy(async () => {
           const inputTensor = expects3D
             ? tf.tensor3d([scaledFeatures], [1, 1, 100])
             : tf.tensor2d([scaledFeatures], [1, 100]);
-          const output = model.predict(inputTensor) as tf.Tensor;
+          const output = layersModel.predict(inputTensor) as tf.Tensor;
           const data = await output.data();
           return data[0] as number;
         });
         return probability; // 0-1
+      }
+      if (graphModel) {
+        const probability = await tf.tidy(async () => {
+          const inputTensor = tf.tensor2d([scaledFeatures], [1, 100]);
+          const output = await graphModel.executeAsync(inputTensor) as tf.Tensor|tf.Tensor[];
+          const tensor = Array.isArray(output) ? output[0] : output;
+          const data = await tensor.data();
+          return data[0] as number;
+        });
+        return probability;
       }
     } catch (error) {
       console.warn('Model prediction failed, using fallback:', error);

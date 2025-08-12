@@ -16,7 +16,7 @@ export class BehaviorGuardAI {
   private static scaler: FeatureScaler | null = null;
 
   static async ensureReady(): Promise<void> {
-    if (!TensorflowService.getModel()) {
+    if (!TensorflowService.hasModel()) {
       await TensorflowService.initialize();
     }
     if (!this.scaler) {
@@ -24,15 +24,17 @@ export class BehaviorGuardAI {
       const scalerJson = require('../../assets/models/feature_scaler.json');
       this.scaler = new FeatureScaler(scalerJson);
     }
-    if (!this.warmedUp && TensorflowService.getModel()) {
+    if (!this.warmedUp && TensorflowService.hasModel()) {
       try {
-        const model = TensorflowService.getModel()!;
-        const expects3D = Array.isArray(model.inputs?.[0]?.shape) && (model.inputs![0].shape!.length === 3);
-        await tf.tidy(() => {
-          const dummy = expects3D ? tf.zeros([1, 1, 100]) : tf.zeros([1, 100]);
-          const out = model.predict(dummy) as tf.Tensor;
-          out.dispose();
-        });
+        const layers = TensorflowService.getLayersModel();
+        if (layers) {
+          const expects3D = Array.isArray(layers.inputs?.[0]?.shape) && (layers.inputs![0].shape!.length === 3);
+          await tf.tidy(() => {
+            const dummy = expects3D ? tf.zeros([1, 1, 100]) : tf.zeros([1, 100]);
+            const out = layers.predict(dummy) as tf.Tensor;
+            out.dispose();
+          });
+        }
       } catch {}
       this.warmedUp = true;
     }
@@ -51,18 +53,27 @@ export class BehaviorGuardAI {
 
   static async infer(scaledFeatures: number[], tx?: Partial<Transaction>): Promise<InferenceResult> {
     await this.ensureReady();
-    const model = TensorflowService.getModel();
+    const layers = TensorflowService.getLayersModel();
+    const graph = TensorflowService.getGraphModel();
     const start = global.performance ? performance.now() : Date.now();
     let score = 0;
     try {
-      if (model) {
-        const expects3D = Array.isArray(model.inputs?.[0]?.shape) && (model.inputs![0].shape!.length === 3);
+      if (layers) {
+        const expects3D = Array.isArray(layers.inputs?.[0]?.shape) && (layers.inputs![0].shape!.length === 3);
         score = await tf.tidy(async () => {
           const inputTensor = expects3D
             ? tf.tensor3d([scaledFeatures], [1, 1, 100])
             : tf.tensor2d([scaledFeatures], [1, 100]);
-          const output = model.predict(inputTensor) as tf.Tensor;
+          const output = layers.predict(inputTensor) as tf.Tensor;
           const data = await output.data();
+          return (data[0] as number) ?? 0;
+        });
+      } else if (graph) {
+        score = await tf.tidy(async () => {
+          const inputTensor = tf.tensor2d([scaledFeatures], [1, 100]);
+          const output = await graph.executeAsync(inputTensor) as tf.Tensor|tf.Tensor[];
+          const tensor = Array.isArray(output) ? output[0] : output;
+          const data = await tensor.data();
           return (data[0] as number) ?? 0;
         });
       }
