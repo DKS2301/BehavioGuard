@@ -1,0 +1,14 @@
+node_modules
+.expo
+.expo-shared
+dist
+web-build
+coverage
+*.log
+.env
+android
+ios
+*.iml
+.DS_Store
+
+

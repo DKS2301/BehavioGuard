@@ -1,0 +1,8 @@
+{
+  "architecture": "Dense(256) → LSTM(128) → Dense(128) → Dense(64) → Dense(1, sigmoid)",
+  "inputFeatures": 100,
+  "featureOrder": [],
+  "performance": { "f1": 0.9, "accuracy": 0.9 }
+}
+
+

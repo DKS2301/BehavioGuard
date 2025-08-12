@@ -1,0 +1,10 @@
+{
+  "files": [
+    "model.json",
+    "feature_scaler.json",
+    "model_metadata.json",
+    "group1-shard1of1.bin"
+  ]
+}
+
+

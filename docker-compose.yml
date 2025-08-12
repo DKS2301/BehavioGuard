@@ -1,0 +1,21 @@
+version: '3.9'
+services:
+  app:
+    build: .
+    container_name: behaviorguard_app
+    ports:
+      - '19000:19000'
+      - '19001:19001'
+      - '19002:19002'
+      - '8081:8081'
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - EXPO_NO_TELEMETRY=1
+      - CHOKIDAR_USEPOLLING=true
+      - REACT_NATIVE_PACKAGER_HOSTNAME=192.168.42.54
+      - REACT_NATIVE_PACKAGER_PORT=8081
+    command: npm run start
+
+
