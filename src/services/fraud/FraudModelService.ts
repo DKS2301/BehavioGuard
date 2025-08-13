@@ -1,6 +1,7 @@
 import * as tf from '@tensorflow/tfjs';
 import { TensorflowService } from '@/services/tf/TensorflowService';
 import { FeatureScaler, StandardScalerParams } from '@/services/fraud/FeatureScaler';
+import { SENSOR_FEATURE_ORDER } from '@/services/fraud/FeatureMapping';
 import { RiskLabel, Transaction, FraudAlert, BehavioralProfile } from '@/types/model';
 
 type PredictOptions = {
@@ -28,7 +29,9 @@ export class FraudModelService {
     if (this.scaler) return;
     // Load scaler JSON from bundled asset
     const scalerJson = require('../../../assets/models/feature_scaler.json');
-    this.scaler = new FeatureScaler(scalerJson as StandardScalerParams);
+    const params = scalerJson as StandardScalerParams;
+    // Force the feature order to match our sensor snapshot ordering
+    this.scaler = new FeatureScaler({ ...params, featureOrder: SENSOR_FEATURE_ORDER });
   }
 
   static getScaler(): FeatureScaler {
@@ -37,48 +40,38 @@ export class FraudModelService {
   }
 
   static async predict({ scaledFeatures, transactionContext, userProfile }: PredictOptions): Promise<number> {
-    const model = TensorflowService.getModel();
+    const model = TensorflowService.getLayersModel() || TensorflowService.getGraphModel();
     if (scaledFeatures.length !== 100) throw new Error('Expected 100 features');
     
     try {
       if (model) {
         const input = tf.tensor2d([scaledFeatures], [1, 100]);
         const output = model.predict(input) as tf.Tensor;
-        const data = await output.data();
+        const data = (output as any).dataSync ? (output as any).dataSync() : await output.data();
         tf.dispose([input, output]);
-        return data[0]; // probability 0-1
+        const prob = (data[0] as number) ?? 0;
+        // eslint-disable-next-line no-console
+        console.log('[ModelPredict]', { prob });
+        return prob; // probability 0-1
       }
     } catch (error) {
       console.warn('Model prediction failed, using fallback:', error);
     }
 
     // Fallback heuristic if model unavailable
-    return this.calculateFallbackRisk(scaledFeatures, transactionContext, userProfile);
+    const fallback = this.calculateFallbackRisk(scaledFeatures, transactionContext, userProfile);
+    // eslint-disable-next-line no-console
+    console.log('[ModelFallback]', { score: fallback });
+    return fallback;
   }
 
   private static calculateFallbackRisk(
-    features: number[], 
-    transactionContext?: Partial<Transaction>,
-    userProfile?: BehavioralProfile
+    _features: number[], 
+    _transactionContext?: Partial<Transaction>,
+    _userProfile?: BehavioralProfile
   ): number {
-    // Simple heuristic based on feature patterns
-    const motionAnomaly = Math.abs(features[0]) + Math.abs(features[1]) + Math.abs(features[2]); // accel
-    const touchAnomaly = features[15] + features[16] + features[17]; // touch features
-    const timingAnomaly = features[35] + features[36] + features[37]; // timing features
-    const locationAnomaly = features[55] + features[56] + features[57]; // location features
-    
-    let risk = (motionAnomaly + touchAnomaly + timingAnomaly + locationAnomaly) / 20;
-    
-    // Adjust based on transaction context
-    if (transactionContext) {
-      if (transactionContext.amount && transactionContext.amount > 10000) risk *= 1.2;
-      if (transactionContext.location && userProfile) {
-        const locationRisk = this.calculateLocationRisk(transactionContext.location, userProfile);
-        risk = Math.max(risk, locationRisk);
-      }
-    }
-    
-    return Math.max(0, Math.min(1, risk));
+    // Conservative baseline risk when model isn't available
+    return 0.2;
   }
 
   private static calculateLocationRisk(
@@ -127,6 +120,8 @@ export class FraudModelService {
     transaction: Transaction,
     userId: string
   ): Promise<RiskAssessment> {
+    // Cold-start guard: suppress high until we accumulate a small history
+    const history = this.riskHistory.get(userId) || [];
     const userProfile = this.userProfiles.get(userId);
     const riskScore = await this.predict({ 
       scaledFeatures: features, 
@@ -134,10 +129,22 @@ export class FraudModelService {
       userProfile 
     });
     
-    const riskLabel = this.riskLabelFromScore(riskScore, {
+    let riskLabel = this.riskLabelFromScore(riskScore, {
       low: 0.3,
       medium: 0.7,
       high: 0.9
+    });
+
+    if (history.length < 5 && riskLabel === 'HIGH') {
+      riskLabel = 'MEDIUM';
+    }
+
+    // eslint-disable-next-line no-console
+    console.log('[AssessRisk]', {
+      userId,
+      riskScore,
+      riskLabel,
+      historyCount: history.length,
     });
 
     // Store risk history
@@ -175,7 +182,13 @@ export class FraudModelService {
     const history = this.riskHistory.get(userId) || [];
     const featureQuality = features.filter(f => f !== 0 && !isNaN(f)).length / features.length;
     const historyConsistency = history.length > 1 ? 
-      1 - Math.std(history.slice(-10)) : 0.5;
+      1 - (() => {
+        const recent = history.slice(-10);
+        const n = recent.length;
+        const mean = recent.reduce((a, b) => a + b, 0) / n;
+        const variance = recent.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / n;
+        return Math.sqrt(variance);
+      })() : 0.5;
     
     return Math.min(1, (featureQuality + historyConsistency) / 2);
   }
@@ -193,12 +206,12 @@ export class FraudModelService {
     }
     
     // Touch pattern anomalies
-    if (features[15] > 0.8 || features[16] > 0.8) {
+    if ((features[45] ?? 0) > 0.8 || (features[46] ?? 0) > 0.8) {
       factors.push('Atypical touch patterns detected');
     }
     
     // Timing anomalies
-    if (features[35] > 5000 || features[36] > 5000) {
+    if ((features[70] ?? 0) > 5000 || (features[71] ?? 0) > 5000) {
       factors.push('Unusual timing patterns detected');
     }
     
@@ -275,6 +288,11 @@ export class FraudModelService {
 
   static getRiskHistory(userId: string): number[] {
     return this.riskHistory.get(userId) || [];
+  }
+
+  static clearUserData(userId: string): void {
+    this.userProfiles.delete(userId);
+    this.riskHistory.delete(userId);
   }
 }
 

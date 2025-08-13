@@ -74,14 +74,7 @@ export default function DashboardScreen({ navigation }: Props) {
   const { features } = useBehaviorStore();
   const [selectedAccount, setSelectedAccount] = useState<Account>(mockAccounts[0]);
 
-  useEffect(() => {
-    // Start fraud detection monitoring
-    fraudDetection.startMonitoring();
-    
-    return () => {
-      fraudDetection.stopMonitoring();
-    };
-  }, [fraudDetection]);
+  // Monitoring auto-starts inside useFraudDetection when userId is provided
 
   const getRiskColor = (riskLabel: RiskLabel): string => {
     switch (riskLabel) {

@@ -90,14 +90,7 @@ export default function TransactionsScreen({ navigation }: Props) {
   const [selectedRiskFilter, setSelectedRiskFilter] = useState<'all' | RiskLabel>('all');
   const [transactions, setTransactions] = useState<Transaction[]>(mockTransactions);
 
-  useEffect(() => {
-    // Start fraud detection monitoring
-    fraudDetection.startMonitoring();
-    
-    return () => {
-      fraudDetection.stopMonitoring();
-    };
-  }, [fraudDetection]);
+  // Monitoring auto-starts inside useFraudDetection when userId is provided
 
   const getRiskColor = (riskLabel: RiskLabel): string => {
     switch (riskLabel) {

@@ -1,6 +1,7 @@
 import * as tf from '@tensorflow/tfjs';
 import { TensorflowService } from '@/services/tf/TensorflowService';
 import { FeatureScaler } from '@/services/fraud/FeatureScaler';
+import { SENSOR_FEATURE_ORDER } from '@/services/fraud/FeatureMapping';
 import { RiskLabel, Transaction } from '@/types/model';
 
 export type InferenceResult = {
@@ -22,7 +23,7 @@ export class BehaviorGuardAI {
     if (!this.scaler) {
       // Share scaler with FraudModelService’s loader (JSON is the same)
       const scalerJson = require('../../assets/models/feature_scaler.json');
-      this.scaler = new FeatureScaler(scalerJson);
+      this.scaler = new FeatureScaler({ ...scalerJson, featureOrder: SENSOR_FEATURE_ORDER });
     }
     if (!this.warmedUp && TensorflowService.hasModel()) {
       try {
@@ -60,22 +61,23 @@ export class BehaviorGuardAI {
     try {
       if (layers) {
         const expects3D = Array.isArray(layers.inputs?.[0]?.shape) && (layers.inputs![0].shape!.length === 3);
-        score = await tf.tidy(async () => {
+        score = tf.tidy(() => {
           const inputTensor = expects3D
-            ? tf.tensor3d([scaledFeatures], [1, 1, 100])
+            ? tf.tensor3d([[scaledFeatures]], [1, 1, 100])
             : tf.tensor2d([scaledFeatures], [1, 100]);
           const output = layers.predict(inputTensor) as tf.Tensor;
-          const data = await output.data();
-          return (data[0] as number) ?? 0;
-        });
+          const data = output.dataSync() as Float32Array | Int32Array | Uint8Array;
+          const value = (data[0] as number) ?? 0;
+          return value;
+        }) as unknown as number;
       } else if (graph) {
-        score = await tf.tidy(async () => {
-          const inputTensor = tf.tensor2d([scaledFeatures], [1, 100]);
-          const output = await graph.executeAsync(inputTensor) as tf.Tensor|tf.Tensor[];
-          const tensor = Array.isArray(output) ? output[0] : output;
-          const data = await tensor.data();
-          return (data[0] as number) ?? 0;
-        });
+        const inputTensor = tf.tensor2d([scaledFeatures], [1, 100]);
+        const outputAny = await graph.executeAsync(inputTensor);
+        const tensor = Array.isArray(outputAny) ? outputAny[0] as tf.Tensor : (outputAny as tf.Tensor);
+        const data = (tensor.dataSync ? tensor.dataSync() : await tensor.data()) as Float32Array | Int32Array | Uint8Array;
+        score = (data[0] as number) ?? 0;
+        inputTensor.dispose();
+        tensor.dispose();
       }
     } catch {
       score = 0;

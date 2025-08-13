@@ -202,6 +202,55 @@ export class FeatureSimulator {
   }
 
   /**
+   * Generate a named feature map keyed by simulator feature names
+   */
+  static generateFeatureMap(
+    isFraud: boolean = false,
+    temporalContext?: Date,
+    transactionContext?: Partial<Transaction>
+  ): Record<string, number> {
+    const map: Record<string, number> = {};
+
+    for (const [category, specs] of Object.entries(this.featureSpecs)) {
+      for (const [featureName, spec] of Object.entries(specs)) {
+        const rangeMin = spec.range[0];
+        const rangeMax = spec.range[1];
+        let value = this.generateValue(spec.dist, rangeMin, rangeMax);
+
+        if (isFraud) {
+          if ('fraudShift' in spec) {
+            const shiftAmount = spec.fraudShift;
+            const noise = this.normalRandom(0, Math.abs(shiftAmount) * 0.3);
+            value += shiftAmount + noise;
+          }
+          if ('fraudMult' in spec) {
+            const mult = spec.fraudMult;
+            const multNoise = this.normalRandom(mult, mult * 0.2);
+            value *= multNoise;
+          }
+        }
+
+        if (temporalContext && ['timeOfDay', 'dayOfWeek'].includes(featureName)) {
+          if (featureName === 'timeOfDay') {
+            value = temporalContext.getHours() + this.normalRandom(0, 1);
+          } else if (featureName === 'dayOfWeek') {
+            value = temporalContext.getDay() + this.normalRandom(0, 0.5);
+          }
+        }
+
+        if (transactionContext && featureName === 'transactionAmount') {
+          value = transactionContext.amount || value;
+        }
+
+        value = Math.max(rangeMin, Math.min(rangeMax, value));
+        map[featureName] = value;
+      }
+    }
+
+    return map;
+  }
+
+  /**
    * Generate legitimate user features
    */
   static generateLegitimateFeatures(
@@ -231,6 +280,14 @@ export class FeatureSimulator {
   ): number[] {
     // For now, generate normal features but could be enhanced with pattern-specific logic
     return this.generateFeatures(isFraud, temporalContext);
+  }
+
+  static generateWithPatternMap(
+    pattern: 'motion' | 'touch' | 'location' | 'transaction' | 'device' | 'behavioral',
+    isFraud: boolean = false,
+    temporalContext?: Date
+  ): Record<string, number> {
+    return this.generateFeatureMap(isFraud, temporalContext);
   }
 
   /**
@@ -295,8 +352,9 @@ export class FeatureSimulator {
     return mean + std * z0;
   }
 
-  private static lognormalRandom(mean: number, std: number): number {
-    const normal = this.normalRandom(Math.log(mean), std);
+  private static lognormalRandom(mu: number, sigma: number): number {
+    // mu and sigma are the mean and std of the underlying normal distribution
+    const normal = this.normalRandom(mu, sigma);
     return Math.exp(normal);
   }
 

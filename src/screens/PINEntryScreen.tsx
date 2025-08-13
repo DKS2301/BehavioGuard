@@ -84,14 +84,7 @@ export default function PINEntryScreen({ navigation, route }: Props) {
     }
   }, [currentRiskLabel, riskIndicatorOpacity, shakeAnimation]);
 
-  useEffect(() => {
-    // Start fraud detection monitoring
-    fraudDetection.startMonitoring();
-    
-    return () => {
-      fraudDetection.stopMonitoring();
-    };
-  }, []); // Remove fraudDetection from dependencies
+  // Monitoring is auto-started by useFraudDetection when userId is provided
 
   useEffect(() => {
     // Monitor risk changes during PIN entry
@@ -164,13 +157,8 @@ export default function PINEntryScreen({ navigation, route }: Props) {
           return;
         }
         
-        if (riskAssessment.requiresAdditionalAuth) {
-          // Navigate to biometric authentication
-          navigation.replace('MainApp');
-        } else {
-          // Direct access granted
-          navigation.replace('MainApp');
-        }
+        // Proceed to main app regardless; you can branch here later if you add biometric step
+        navigation.replace('MainApp');
       } else {
         Alert.alert('Invalid PIN', 'Please try again.');
         setPin([]);

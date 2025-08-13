@@ -39,6 +39,7 @@ export function useFraudDetection(userId?: string) {
     setIsRunning(true);
     sensors.start();
     
+    // Use a slower cadence and do not create alerts here; only surface live risk
     intervalRef.current = setInterval(async () => {
       try {
         // Collect behavioral features from sensors
@@ -52,10 +53,10 @@ export function useFraudDetection(userId?: string) {
         const vector = scaler.transform(raw);
         setFeatures(vector);
         
-        // Perform real-time risk assessment
+        // Perform real-time risk assessment without generating alerts
         const riskAssessment = await FraudModelService.assessTransactionRisk(
           vector,
-          lastTransactionRef.current || {
+          {
             id: 'monitoring',
             amount: 0,
             account: '',
@@ -77,31 +78,23 @@ export function useFraudDetection(userId?: string) {
         setRecommendations(riskAssessment.recommendations);
         setRequiresAdditionalAuth(riskAssessment.requiresAdditionalAuth);
         setShouldBlock(riskAssessment.shouldBlock);
+
+        // Monitoring log for observability
+        // eslint-disable-next-line no-console
+        console.log('[Monitoring]', {
+          t: new Date().toISOString(),
+          userId: userId || 'anonymous',
+          risk: riskAssessment.riskScore,
+          label: riskAssessment.riskLabel,
+          featuresNonZero: vector.filter((v) => v !== 0 && !Number.isNaN(v)).length,
+        });
         
-        // Create fraud alert if risk is high
-        if (riskAssessment.riskLabel === 'HIGH') {
-          const alert = await FraudModelService.createFraudAlert(
-            userId || 'anonymous',
-            lastTransactionRef.current || {
-              id: 'monitoring',
-              amount: 0,
-              account: '',
-              accountName: '',
-              type: 'transfer',
-              status: 'pending',
-              timestamp: new Date(),
-              fraudRiskScore: riskAssessment.riskScore,
-              fraudRiskLabel: riskAssessment.riskLabel
-            },
-            riskAssessment
-          );
-          setFraudAlerts(prev => [alert, ...prev]);
-        }
+        // Do not generate alerts on background monitoring
         
       } catch (error) {
         console.warn('Fraud detection monitoring error:', error);
       }
-    }, 1000); // Update every second for real-time monitoring
+    }, 3000); // Slower background cadence
   }, [isRunning, sensors, setFeatures, userId]);
 
   const stopMonitoring = useCallback(() => {
@@ -114,7 +107,10 @@ export function useFraudDetection(userId?: string) {
   }, [sensors]);
 
   const evaluateTransaction = useCallback(
-    async (transaction: Transaction): Promise<{
+    async (
+      transaction: Transaction,
+      options?: { simulatedVector?: number[]; rawSimulatedMap?: Record<string, number> }
+    ): Promise<{
       riskLabel: RiskLabel;
       riskScore: number;
       confidence: number;
@@ -127,17 +123,20 @@ export function useFraudDetection(userId?: string) {
       lastTransactionRef.current = transaction;
       
       try {
-        // Get current behavioral features
-        const raw = sensors.getFeatureSnapshot();
+        // Get features: prefer explicit simulation overrides if provided
         const scaler = FraudModelService.getScaler();
-        const vector = scaler.transform(raw);
+        let vector: number[];
+        if (options?.simulatedVector && options.simulatedVector.length === 100) {
+          vector = scaler.transformVector(options.simulatedVector);
+        } else if (options?.rawSimulatedMap) {
+          vector = scaler.transform(options.rawSimulatedMap);
+        } else {
+          const raw = sensors.getFeatureSnapshot();
+          vector = scaler.transform(raw);
+        }
         
-        // Assess transaction risk
-        const riskAssessment = await FraudModelService.assessTransactionRisk(
-          vector,
-          transaction,
-          userId || 'anonymous'
-        );
+        // Assess transaction risk and create alerts only for explicit transactions
+        const riskAssessment = await FraudModelService.assessTransactionRisk(vector, transaction, userId || 'anonymous');
         
         // Update state
         setRiskScore(riskAssessment.riskScore);
@@ -148,7 +147,18 @@ export function useFraudDetection(userId?: string) {
         setRequiresAdditionalAuth(riskAssessment.requiresAdditionalAuth);
         setShouldBlock(riskAssessment.shouldBlock);
         
-        // Create fraud alert if needed
+        // Logging for explicit transaction evaluation
+        // eslint-disable-next-line no-console
+        console.log('[EvaluateTransaction]', {
+          t: new Date().toISOString(),
+          userId: userId || 'anonymous',
+          txId: transaction.id,
+          amount: transaction.amount,
+          risk: riskAssessment.riskScore,
+          label: riskAssessment.riskLabel,
+        });
+
+        // Create fraud alert only when evaluateTransaction is called
         if (riskAssessment.riskLabel === 'MEDIUM' || riskAssessment.riskLabel === 'HIGH') {
           const alert = await FraudModelService.createFraudAlert(
             userId || 'anonymous',
@@ -156,6 +166,9 @@ export function useFraudDetection(userId?: string) {
             riskAssessment
           );
           setFraudAlerts(prev => [alert, ...prev]);
+
+          // eslint-disable-next-line no-console
+          console.log('[AlertCreated]', { id: alert.id, label: alert.severity, score: alert.riskScore });
         }
         
         return riskAssessment;
@@ -176,6 +189,30 @@ export function useFraudDetection(userId?: string) {
     },
     [sensors, userId]
   );
+
+  const clearBaseline = useCallback(() => {
+    try {
+      if (userId) {
+        stopMonitoring();
+        FraudModelService.clearUserData(userId);
+      }
+      // Reset alerts and local state directly to avoid ordering issues
+      setFraudAlerts([]);
+      setRiskScore(0);
+      setRiskLabel('LOW');
+      setConfidence(0);
+      setRiskFactors([]);
+      setRecommendations([]);
+      setRequiresAdditionalAuth(false);
+      setShouldBlock(false);
+      // eslint-disable-next-line no-console
+      console.log('[BaselineCleared]', { userId: userId || 'anonymous', t: new Date().toISOString() });
+      if (userId) startMonitoring();
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('Baseline clear failed', e);
+    }
+  }, [userId, stopMonitoring, startMonitoring]);
 
   const updateBehavioralProfile = useCallback((profile: BehavioralProfile) => {
     if (userId) {
@@ -209,16 +246,16 @@ export function useFraudDetection(userId?: string) {
     );
   }, []);
 
-  // Auto-start monitoring when component mounts
+  // Auto-start monitoring when component mounts for a given user
   useEffect(() => {
-    if (userId) {
-      startMonitoring();
-    }
-    
+    if (!userId) return;
+    startMonitoring();
     return () => {
       stopMonitoring();
     };
-  }, [userId, startMonitoring, stopMonitoring]);
+    // Deliberately exclude function refs to avoid re-running on every render
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
 
   return {
     // State
@@ -241,6 +278,7 @@ export function useFraudDetection(userId?: string) {
     getRiskHistory,
     clearFraudAlerts,
     resolveFraudAlert,
+    clearBaseline,
     
     // Sensor data
     sensorData: sensors.getCurrentSensorData(),

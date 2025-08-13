@@ -56,8 +56,13 @@ export function FraudSimulationPanel() {
     setIsSimulationActive(true);
     setActivePattern(pattern);
     
-    // Generate fraud features for the selected pattern
-    const fraudFeatures = FeatureSimulator.generateWithPattern(
+    // Generate fraud features for the selected pattern (vector and raw map)
+    const fraudVector = FeatureSimulator.generateWithPattern(
+      pattern,
+      simulationMode === 'fraud',
+      new Date()
+    );
+    const fraudMap = FeatureSimulator.generateWithPatternMap(
       pattern,
       simulationMode === 'fraud',
       new Date()
@@ -67,7 +72,7 @@ export function FraudSimulationPanel() {
     console.log(`🚨 Fraud Simulation Started:`);
     console.log(`   Pattern: ${pattern}`);
     console.log(`   Mode: ${simulationMode}`);
-    console.log(`   Features:`, fraudFeatures.slice(0, 10)); // Show first 10 features
+    console.log(`   Features:`, fraudVector.slice(0, 10)); // Show first 10 features
 
     // Show alert with simulation details
     Alert.alert(
@@ -96,8 +101,10 @@ export function FraudSimulationPanel() {
       fraudRiskLabel: 'LOW' as const,
     };
 
-    // Evaluate the test transaction
-    fraudDetection.evaluateTransaction(testTransaction).then(result => {
+    // Evaluate the test transaction using simulated features to drive the model
+    const isFraud = simulationMode === 'fraud';
+    const simVector = FeatureSimulator.generateFeatures(isFraud, new Date(), { amount: testTransaction.amount });
+    fraudDetection.evaluateTransaction(testTransaction, { simulatedVector: simVector }).then(result => {
       Alert.alert(
         'Test Transaction Result',
         `Amount: ₹${testTransaction.amount}\nRisk Score: ${(result.riskScore * 100).toFixed(1)}%\nRisk Label: ${result.riskLabel}\nBlocked: ${result.shouldBlock ? 'Yes' : 'No'}`,
@@ -131,12 +138,17 @@ export function FraudSimulationPanel() {
       <View style={styles.header}>
         <Ionicons name="bug" size={24} color="#ef4444" />
         <Text style={styles.title}>Fraud Simulation Panel</Text>
-        <Switch
-          value={isSimulationActive}
-          onValueChange={(value) => value ? null : stopSimulation()}
-          trackColor={{ false: '#374151', true: '#ef4444' }}
-          thumbColor={isSimulationActive ? '#ffffff' : '#9ca3af'}
-        />
+          <Switch
+            value={isSimulationActive}
+            onValueChange={(value) => {
+              setIsSimulationActive(value);
+              if (!value) {
+                stopSimulation();
+              }
+            }}
+            trackColor={{ false: '#374151', true: '#ef4444' }}
+            thumbColor={isSimulationActive ? '#ffffff' : '#9ca3af'}
+          />
       </View>
 
       <View style={styles.modeSelector}>
@@ -145,7 +157,7 @@ export function FraudSimulationPanel() {
           <TouchableOpacity
             style={[
               styles.modeButton,
-              simulationMode === 'legitimate' && styles.modeButtonActive
+              simulationMode === 'legitimate' && styles.modeButtonActiveLegit
             ]}
             onPress={() => setSimulationMode('legitimate')}
           >
@@ -165,7 +177,7 @@ export function FraudSimulationPanel() {
           <TouchableOpacity
             style={[
               styles.modeButton,
-              simulationMode === 'fraud' && styles.modeButtonActive
+              simulationMode === 'fraud' && styles.modeButtonActiveFraud
             ]}
             onPress={() => setSimulationMode('fraud')}
           >
@@ -293,9 +305,13 @@ const styles = StyleSheet.create({
     borderColor: '#2a3567',
     backgroundColor: '#1f2937',
   },
-  modeButtonActive: {
-    backgroundColor: simulationMode === 'fraud' ? '#ef4444' : '#22c55e',
-    borderColor: simulationMode === 'fraud' ? '#ef4444' : '#22c55e',
+  modeButtonActiveLegit: {
+    backgroundColor: '#22c55e',
+    borderColor: '#22c55e',
+  },
+  modeButtonActiveFraud: {
+    backgroundColor: '#ef4444',
+    borderColor: '#ef4444',
   },
   modeButtonText: {
     fontSize: 14,

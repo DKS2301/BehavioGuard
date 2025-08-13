@@ -16,14 +16,7 @@ export default function SecurityDashboardScreen({ navigation }: Props) {
   const { features } = useBehaviorStore();
   const [selectedTimeframe, setSelectedTimeframe] = useState<'24h' | '7d' | '30d'>('24h');
 
-  useEffect(() => {
-    // Start fraud detection monitoring
-    fraudDetection.startMonitoring();
-    
-    return () => {
-      fraudDetection.stopMonitoring();
-    };
-  }, [fraudDetection]);
+  // Monitoring auto-starts inside useFraudDetection when userId is provided
 
   const getRiskColor = (riskLabel: RiskLabel): string => {
     switch (riskLabel) {

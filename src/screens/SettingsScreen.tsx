@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFraudDetection } from '@/services/fraud/useFraudDetection';
+import { FraudModelService } from '@/services/fraud/FraudModelService';
 import { SecuritySettings, User } from '@/types/model';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import type { MainTabParamList } from '@/navigation/AppNavigator';
@@ -40,14 +41,7 @@ export default function SettingsScreen({ navigation }: Props) {
     },
   });
 
-  useEffect(() => {
-    // Start fraud detection monitoring
-    fraudDetection.startMonitoring();
-    
-    return () => {
-      fraudDetection.stopMonitoring();
-    };
-  }, [fraudDetection]);
+  // Monitoring auto-starts inside useFraudDetection when userId is provided
 
   const handleSettingToggle = (setting: keyof SecuritySettings, value: boolean) => {
     if (setting === 'biometricEnabled' && !value) {
@@ -348,9 +342,9 @@ export default function SettingsScreen({ navigation }: Props) {
           <Ionicons name="chevron-forward" size={20} color="#6b7280" />
         </TouchableOpacity>
         
-        <TouchableOpacity style={styles.actionButton}>
+        <TouchableOpacity style={styles.actionButton} onPress={() => { fraudDetection.clearBaseline(); }}>
           <Ionicons name="card-outline" size={20} color="#8b5cf6" />
-          <Text style={styles.actionButtonText}>Manage Cards</Text>
+          <Text style={styles.actionButtonText}>Clear Baseline & Alerts</Text>
           <Ionicons name="chevron-forward" size={20} color="#6b7280" />
         </TouchableOpacity>
         
