@@ -102,7 +102,7 @@ src/
 ```bash
 # Clone the repository
 git clone <repository-url>
-cd SecureBank
+cd BehavioGuard
 
 # Install dependencies
 npm install
